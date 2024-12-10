@@ -1,0 +1,83 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Helper functions
+    function isSignedIn() {
+      return request.auth != null;
+    }
+    
+    function isOwner(userId) {
+      return request.auth.uid == userId;
+    }
+    
+    function isValidAmount() {
+      return request.resource.data.amount is number && 
+             request.resource.data.amount > 0;
+    }
+    
+    function isValidTransactionType() {
+      return request.resource.data.type in ['income', 'expense', 'debt', 'investment'];
+    }
+    
+    function hasRequiredTransactionFields() {
+      let data = request.resource.data;
+      return data.keys().hasAll([
+        'amount', 'type', 'category', 'date', 'details'
+      ]);
+    }
+    
+    function isValidTimestamp() {
+      return request.resource.data.date is timestamp &&
+             request.resource.data.date.toMillis() <= request.time.toMillis();
+    }
+
+    // User data structure
+    match /users/{userId} {
+      allow read: if isSignedIn() && isOwner(userId);
+      allow create: if isSignedIn() && isOwner(userId);
+      
+      // Transactions subcollection
+      match /transactions/{transactionId} {
+        allow read: if isSignedIn() && isOwner(userId);
+        allow create: if isSignedIn() && isOwner(userId) && 
+          hasRequiredTransactionFields() &&
+          isValidAmount() &&
+          isValidTransactionType() &&
+          isValidTimestamp();
+        allow update: if isSignedIn() && isOwner(userId) &&
+          isValidAmount() &&
+          isValidTransactionType();
+        allow delete: if isSignedIn() && isOwner(userId);
+      }
+      
+      // Fund sources subcollection
+      match /fundSources/{sourceId} {
+        allow read: if isSignedIn() && isOwner(userId);
+        allow create, update: if isSignedIn() && isOwner(userId) &&
+          request.resource.data.balance is number &&
+          request.resource.data.bankName is string &&
+          request.resource.data.accountName is string &&
+          request.resource.data.bankName.size() > 0 &&
+          request.resource.data.accountName.size() > 0;
+        allow delete: if isSignedIn() && isOwner(userId);
+      }
+      
+      // Credit cards subcollection
+      match /creditCards/{cardId} {
+        allow read: if isSignedIn() && isOwner(userId);
+        allow create, update: if isSignedIn() && isOwner(userId) &&
+          request.resource.data.limit is number &&
+          request.resource.data.limit > 0 &&
+          request.resource.data.balance is number &&
+          request.resource.data.balance >= 0 &&
+          request.resource.data.balance <= request.resource.data.limit &&
+          request.resource.data.bank is string &&
+          request.resource.data.name is string &&
+          request.resource.data.bank.size() > 0 &&
+          request.resource.data.name.size() > 0;
+        allow delete: if isSignedIn() && isOwner(userId);
+      }
+    }
+  }
+}
